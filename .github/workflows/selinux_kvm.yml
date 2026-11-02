@@ -73,6 +73,8 @@ jobs:
           mkdir -p ~/.ansible/collections/ansible_collections/vitabaks
           ln -sfn "$PWD/automation" ~/.ansible/collections/ansible_collections/vitabaks/autobase
           . .venv/bin/activate
+          # Controller-side libraries for ansible.utils.ipaddr and json_query, not in requirements.txt
+          pip install -q netaddr jmespath
           ansible-galaxy collection install -r automation/requirements.yml
 
       - name: Deploy cluster
