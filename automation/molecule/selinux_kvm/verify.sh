@@ -32,6 +32,10 @@ for ip in $ips; do
     [ "$type" = "postgresql_db_t" ] || fail "$ip: $path is $type, expected postgresql_db_t"
   done
 
+  # "0 denials" only counts if the audit log is actually being read.
+  "${SSH[@]}" "root@$ip" 'ausearch -m DAEMON_START -ts boot >/dev/null 2>&1' \
+    || fail "$ip: no audit records since boot, is auditd running?"
+
   denials=$("${SSH[@]}" "root@$ip" 'ausearch -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null | grep -c -E "^type=(AVC|USER_AVC|SELINUX_ERR)"')
   [ "${denials:-0}" -eq 0 ] || fail "$ip: $denials SELinux denials since boot"
 done
