@@ -14,6 +14,7 @@ require {
 	type postgresql_db_t;
 	type postgresql_log_t;
 	type postgresql_var_run_t;
+	type krb5_keytab_t;
 }
 
 type patroni_t;
@@ -51,6 +52,10 @@ kernel_read_system_state(patroni_t)
 kernel_read_network_state(patroni_t)
 kernel_read_kernel_sysctls(patroni_t)
 
+# Patroni (psutil) reads /proc/<pid>/stat to tell whether the PID in postmaster.pid
+# still belongs to PostgreSQL, which can be any process after a restart.
+domain_read_all_domains_state(patroni_t)
+
 dev_read_sysfs(patroni_t)
 dev_read_urand(patroni_t)
 dev_rw_watchdog(patroni_t)
@@ -61,6 +66,8 @@ auth_use_nsswitch(patroni_t)
 miscfiles_read_localization(patroni_t)
 miscfiles_read_generic_certs(patroni_t)
 sysnet_read_config(patroni_t)
+# libpq (Patroni, pg_basebackup) probes for Kerberos credentials; nothing is needed from there
+dontaudit patroni_t krb5_keytab_t:dir search;
 logging_send_syslog_msg(patroni_t)
 
 manage_dirs_pattern(patroni_t, patroni_log_t, patroni_log_t)
@@ -100,6 +107,9 @@ domtrans_pattern(patroni_t, postgresql_exec_t, postgresql_t)
 ps_process_pattern(patroni_t, postgresql_t)
 allow patroni_t postgresql_t:process signal_perms;
 stream_connect_pattern(patroni_t, postgresql_var_run_t, postgresql_var_run_t, postgresql_t)
+
+# initdb reads the password file Patroni writes to /tmp
+read_files_pattern(postgresql_t, patroni_tmp_t, patroni_tmp_t)
 
 allow postgresql_t patroni_t:fd use;
 allow postgresql_t patroni_t:fifo_file rw_fifo_file_perms;
