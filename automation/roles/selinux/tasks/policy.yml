@@ -1,0 +1,69 @@
+---
+# Confine Patroni and PostgreSQL: install the autobase_patroni policy module and label the
+# executables it refers to. Processes that are already running keep their domain until
+# Patroni is restarted; the role does not restart it.
+- block:
+    - name: SELinux | install the policy development tools
+      ansible.builtin.package:
+        name:
+          - selinux-policy-devel
+          - make
+        state: present
+      register: package_status
+      until: package_status is success
+      delay: 5
+      retries: 3
+
+    - name: SELinux | make sure the policy module directory exists
+      ansible.builtin.file:
+        path: "{{ selinux_policy_module_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: SELinux | copy the autobase_patroni policy module
+      ansible.builtin.copy:
+        src: "autobase_patroni.{{ item }}"
+        dest: "{{ selinux_policy_module_dir }}/autobase_patroni.{{ item }}"
+        mode: "0644"
+      loop: ["te", "fc"]
+      register: selinux_module_source
+
+    - name: SELinux | check whether the autobase_patroni policy module is loaded
+      ansible.builtin.shell: |
+        set -o pipefail
+        semodule -l | awk '{print $1}' | grep -qx autobase_patroni
+      args:
+        executable: /bin/bash
+      register: selinux_module_loaded
+      changed_when: false
+      failed_when: false
+
+    - name: SELinux | build and load the autobase_patroni policy module
+      ansible.builtin.shell: |
+        make -f /usr/share/selinux/devel/Makefile autobase_patroni.pp
+        semodule -i autobase_patroni.pp
+      args:
+        chdir: "{{ selinux_policy_module_dir }}"
+      when: selinux_module_source is changed or selinux_module_loaded.rc != 0
+
+    # PGDG installs the server under /usr/pgsql-<version>/bin, which the base policy does not
+    # label as postgresql_exec_t, so Patroni would start PostgreSQL in its own domain.
+    - name: SELinux | add file context rules for the PostgreSQL server executables
+      community.general.sefcontext:
+        target: "{{ postgresql_bin_dir }}/(postgres|initdb|pg_ctl)"
+        ftype: f
+        setype: postgresql_exec_t
+        state: present
+
+    - name: SELinux | add file context rules for the Patroni log directory
+      community.general.sefcontext:
+        target: "{{ patroni_log_dir }}(/.*)?"
+        setype: patroni_log_t
+        state: present
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_selinux.status is defined
+    - ansible_selinux.status == "enabled"
+    - selinux_patroni_policy | bool
+    - inventory_hostname in groups['postgres_cluster'] | default([])
+  tags: selinux, selinux_policy

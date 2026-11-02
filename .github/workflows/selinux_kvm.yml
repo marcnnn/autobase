@@ -75,13 +75,6 @@ jobs:
             echo "$ip: $($SSH "root@$ip" 'getenforce; uname -r' | tr '\n' ' ')"
           done
 
-      - name: Set SELinux mode
-        run: |
-          for ip in $(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "$INVENTORY"); do
-            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-              "root@$ip" "setenforce $([ "$SELINUX" = enforcing ] && echo 1 || echo 0); getenforce"
-          done
-
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -103,30 +96,43 @@ jobs:
         working-directory: automation
         run: |
           . ../.venv/bin/activate
-          ansible-playbook -i "$INVENTORY" playbooks/deploy_pgcluster.yml -e @molecule/selinux_kvm/vars.yml
+          ansible-playbook -i "$INVENTORY" playbooks/deploy_pgcluster.yml -e @molecule/selinux_kvm/vars.yml \
+            -e selinux_state="$SELINUX"
 
       - name: Collect after deploy
         if: always()
         run: bash automation/molecule/selinux_kvm/collect.sh "$INVENTORY" "$OUT" deploy
 
+      # With synchronous_mode, Patroni switches over only to the synchronous standby.
       - name: Switchover
         id: switchover
         if: steps.deploy.outcome == 'success'
         continue-on-error: true
         run: |
           leader=$(awk '/^\[master\]/{getline; print $1}' "$INVENTORY")
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$leader" \
-            'patronictl -c /etc/patroni/patroni.yml switchover --leader pgnode01 --candidate pgnode02 --force;
-             sleep 20; patronictl -c /etc/patroni/patroni.yml list'
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$leader" '
+            set -e
+            cfg=/etc/patroni/patroni.yml
+            candidate=$(patronictl -c $cfg list -f json | python3 -c "import json,sys; print(next(m[\"Member\"] for m in json.load(sys.stdin) if m[\"Role\"] == \"Sync Standby\"))")
+            patronictl -c $cfg switchover --leader pgnode01 --candidate "$candidate" --force
+            sleep 20
+            patronictl -c $cfg list'
 
       - name: Collect after switchover
         if: steps.switchover.outcome != 'skipped'
         run: bash automation/molecule/selinux_kvm/collect.sh "$INVENTORY" "$OUT" switchover
 
+      - name: Verify
+        id: verify
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: bash automation/molecule/selinux_kvm/verify.sh "$INVENTORY" "${SELINUX^}" | tee -a "$OUT/summary.md"
+
       - name: Job summary
         if: always()
         run: |
-          echo "Deploy: ${{ steps.deploy.outcome }}, switchover: ${{ steps.switchover.outcome }}, SELinux: $SELINUX" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy: ${{ steps.deploy.outcome }}, switchover: ${{ steps.switchover.outcome }}, verify: ${{ steps.verify.outcome }}, SELinux: $SELINUX" >> "$GITHUB_STEP_SUMMARY"
           cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Upload report
@@ -136,6 +142,6 @@ jobs:
           name: selinux-report
           path: selinux-report/
 
-      - name: Fail on a failed deployment
-        if: steps.deploy.outcome != 'success'
+      - name: Fail on a failed step
+        if: steps.deploy.outcome != 'success' || steps.switchover.outcome != 'success' || steps.verify.outcome != 'success'
         run: exit 1
