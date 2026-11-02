@@ -1,0 +1,119 @@
+---
+name: SELinux (KVM)
+
+# Deploys a three-node cluster on real VMs (libvirt/KVM on the GitHub-hosted runner)
+# and records every SELinux denial. Containers cannot do this: SELinux belongs to the
+# host kernel, and the Ubuntu runners use AppArmor.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Cloud image URL"
+        default: "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+      selinux:
+        description: "SELinux mode during the deployment"
+        type: choice
+        options: [permissive, enforcing]
+        default: permissive
+  push:
+    branches:
+      - ci-selinux-kvm
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IMAGE: ${{ inputs.image || 'https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2' }}
+      SELINUX: ${{ inputs.selinux || 'permissive' }}
+      INVENTORY: ${{ github.workspace }}/selinux-inventory
+      OUT: ${{ github.workspace }}/selinux-report
+      PY_COLORS: "1"
+      ANSIBLE_FORCE_COLOR: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          nproc; free -g; df -h /
+
+      - name: Install libvirt
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-kvm qemu-utils libvirt-daemon-system virtinst
+          sudo systemctl start libvirtd
+          sudo virsh net-start default 2>/dev/null || true
+
+      - name: Boot VMs
+        run: bash automation/molecule/selinux_kvm/vms.sh "$IMAGE" "$INVENTORY"
+
+      - name: Set SELinux mode
+        run: |
+          for ip in $(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "$INVENTORY"); do
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+              "root@$ip" "setenforce $([ "$SELINUX" = enforcing ] && echo 1 || echo 0); getenforce"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.15"
+
+      - name: Install dependencies
+        run: |
+          make bootstrap
+          mkdir -p ~/.ansible/collections/ansible_collections/vitabaks
+          ln -sfn "$PWD/automation" ~/.ansible/collections/ansible_collections/vitabaks/autobase
+          . .venv/bin/activate
+          ansible-galaxy collection install -r automation/requirements.yml
+
+      - name: Deploy cluster
+        id: deploy
+        continue-on-error: true
+        working-directory: automation
+        run: |
+          . ../.venv/bin/activate
+          ansible-playbook -i "$INVENTORY" playbooks/deploy_pgcluster.yml -e @molecule/selinux_kvm/vars.yml
+
+      - name: Collect after deploy
+        if: always()
+        run: bash automation/molecule/selinux_kvm/collect.sh "$INVENTORY" "$OUT" deploy
+
+      - name: Switchover
+        id: switchover
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
+        run: |
+          leader=$(awk '/^\[master\]/{getline; print $1}' "$INVENTORY")
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$leader" \
+            'patronictl -c /etc/patroni/patroni.yml switchover --leader pgnode01 --candidate pgnode02 --force;
+             sleep 20; patronictl -c /etc/patroni/patroni.yml list'
+
+      - name: Collect after switchover
+        if: steps.switchover.outcome != 'skipped'
+        run: bash automation/molecule/selinux_kvm/collect.sh "$INVENTORY" "$OUT" switchover
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "Deploy: ${{ steps.deploy.outcome }}, switchover: ${{ steps.switchover.outcome }}, SELinux: $SELINUX" >> "$GITHUB_STEP_SUMMARY"
+          cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selinux-report
+          path: selinux-report/
+
+      - name: Fail on a failed deployment
+        if: steps.deploy.outcome != 'success'
+        run: exit 1
