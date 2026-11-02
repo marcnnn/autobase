@@ -1,0 +1,31 @@
+---
+name: SELinux probe
+
+# Fork-only helper: boot the test VMs and run .github/probe.sh on the first node.
+on:
+  push:
+    branches:
+      - ci-selinux-probe
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: KVM and libvirt
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q && sudo apt-get install -y -q qemu-kvm qemu-utils libvirt-daemon-system virtinst
+          sudo systemctl start libvirtd; sudo virsh net-start default 2>/dev/null || true
+      - name: Boot VMs
+        run: bash automation/molecule/selinux_kvm/vms.sh "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2" inventory
+      - name: Probe
+        run: |
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR .github/probe.sh root@192.168.122.11:/root/probe.sh
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR root@192.168.122.11 'bash /root/probe.sh' 2>&1 | tee probe.out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: probe
+          path: probe.out
