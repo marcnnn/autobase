@@ -5,6 +5,9 @@ with_haproxy_load_balancing: true
 postgresql_version: 18
 firewall_enabled_at_boot: false
 swap_file_create: false
+# vm.overcommit_memory=2 with the default ratio of 50 leaves a 3 GB VM ~1.5 GB of
+# commit limit, and PostgreSQL fails with "out of memory". Same as the Molecule scenario.
+sysctl_set: false
 nameservers: ["8.8.8.8", "9.9.9.9"]
 timezone: "Etc/UTC"
 synchronous_mode: true
