@@ -1067,6 +1067,10 @@ swap_file_size_mb: "4096" # change this value for your system
 # SELinux (applies only to hosts where SELinux is enabled)
 selinux_state: "" # "enforcing", "permissive" or "" to leave the current mode unchanged
 selinux_policy: "targeted"
+# Run Patroni in its own domain (patroni_t) and PostgreSQL in postgresql_t instead of unconfined_service_t.
+# Builds and loads the autobase_patroni policy module; running processes change domain on the next Patroni restart.
+selinux_patroni_policy: false
+selinux_policy_module_dir: "/usr/share/selinux/autobase"
 
 # Kernel parameters
 sysctl_set: true
