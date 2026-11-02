@@ -55,6 +55,20 @@ jobs:
       - name: Boot VMs
         run: bash automation/molecule/selinux_kvm/vms.sh "$IMAGE" "$INVENTORY"
 
+      # Cloud images lag behind the repos; an outdated gpgme cannot verify the PGDG repo
+      # signature ("Invalid crypto engine"). Upgrade and boot the current kernel.
+      - name: Update VMs
+        run: |
+          SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5"
+          ips=$(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "$INVENTORY")
+          for ip in $ips; do $SSH "root@$ip" 'dnf -y -q upgrade' & done; wait
+          for ip in $ips; do $SSH "root@$ip" 'systemctl reboot' || true; done
+          sleep 20
+          for ip in $ips; do
+            for _ in $(seq 1 60); do $SSH "root@$ip" true 2>/dev/null && break; sleep 5; done
+            echo "$ip: $($SSH "root@$ip" 'getenforce; uname -r' | tr '\n' ' ')"
+          done
+
       - name: Set SELinux mode
         run: |
           for ip in $(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "$INVENTORY"); do
