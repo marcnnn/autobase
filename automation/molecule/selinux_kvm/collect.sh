@@ -18,6 +18,8 @@ ips=$(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "
   for ip in $ips; do
     "${SSH[@]}" "root@$ip" 'command -v audit2allow >/dev/null || dnf -q -y install policycoreutils-python-utils >/dev/null' || true
     "${SSH[@]}" "root@$ip" 'ausearch -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null' >"$OUT/$ip-$LABEL-avc.log"
+    "${SSH[@]}" "root@$ip" 'journalctl -b --no-pager -u patroni | tail -200; tail -n 200 /var/log/postgresql/*.log 2>/dev/null;
+      ss -ltnp' >"$OUT/$ip-$LABEL-services.log" 2>&1
     count=$(grep -c '^type=AVC' "$OUT/$ip-$LABEL-avc.log" || true)
     echo "### $ip: $("${SSH[@]}" "root@$ip" getenforce), $count AVC records"
     echo
