@@ -33,11 +33,14 @@ for ip in $ips; do
   done
 
   # "0 denials" only counts if the audit log is actually being read.
-  "${SSH[@]}" "root@$ip" 'ausearch -m DAEMON_START -ts boot >/dev/null 2>&1' \
+  "${SSH[@]}" "root@$ip" 'ausearch --input-logs -m DAEMON_START -ts boot >/dev/null 2>&1' \
     || fail "$ip: no audit records since boot, is auditd running?"
 
-  denials=$("${SSH[@]}" "root@$ip" 'ausearch -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null | grep -c -E "^type=(AVC|USER_AVC|SELINUX_ERR)"')
-  [ "${denials:-0}" -eq 0 ] || fail "$ip: $denials SELinux denials since boot"
+  # Only the confined domains count; other services (e.g. haproxy_t, which Autobase sets
+  # to permissive) may log denials that are not in scope here.
+  denials=$("${SSH[@]}" "root@$ip" 'ausearch --input-logs -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null \
+    | grep -E "^type=(AVC|USER_AVC|SELINUX_ERR)" | grep -c -E "scontext=[^ ]*:(patroni_t|postgresql_t):"')
+  [ "${denials:-0}" -eq 0 ] || fail "$ip: $denials SELinux denials for patroni_t/postgresql_t since boot"
 done
 
 [ "$failures" -eq 0 ] && echo "SELinux checks passed" || exit 1
