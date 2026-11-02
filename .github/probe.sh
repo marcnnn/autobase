@@ -1,12 +1,6 @@
-dnf -y -q install setools-console selinux-policy-devel >/dev/null 2>&1
-echo "== policy"; rpm -q selinux-policy-targeted
-echo "== types"; seinfo -t | grep -iE 'etcd|pgbouncer|haproxy|consul|keepalived|confd|vip|pgbackrest|walg|postgresql_' | sort
-echo "== ports"; semanage port -l | grep -E '\b(2379|2380|6432|8008|8500|8300|8301|5000|5001|5002|5003|7000)\b'
-echo "== port types"; semanage port -l | grep -iE 'etcd|pgbouncer|haproxy|consul|postgres|commplex|http_port'
-echo "== interface files"; ls /usr/share/selinux/devel/include/contrib | grep -iE 'etcd|pgbouncer|haproxy|keepalived|consul|rhcs|postgres|cluster' 
-echo "== fcontexts"; for p in /usr/bin/pgbackrest /var/lib/pgbackrest /var/log/pgbackrest /etc/pgbackrest /tmp/pgbackrest /usr/bin/pgbouncer /etc/pgbouncer /var/log/pgbouncer /var/run/pgbouncer /usr/local/bin/etcd /usr/bin/etcd /var/lib/etcd /etc/etcd /usr/local/bin/confd /etc/confd /usr/bin/vip-manager /usr/sbin/haproxy /etc/haproxy /usr/local/bin/wal-g; do echo "$p $(matchpathcon -n $p 2>&1)"; done
-echo "== postgresql_t network"; sesearch -A -s postgresql_t -c tcp_socket -p name_connect
-echo "== postgresql_t exec"; sesearch -A -s postgresql_t -c file -p execute | head -30
-echo "== postgresql_t transitions"; sesearch -T -s postgresql_t -c process
-echo "== booleans"; getsebool -a | grep -iE 'postgres|haproxy|nis_enabled|selinuxuser'
-echo "== pgbouncer interfaces"; grep -l -i pgbouncer -r /usr/share/selinux/devel/include | head
+dnf -y -q install setools-console >/dev/null 2>&1
+echo "== ports"; for p in 8300 8301 8302 8400 8500 8600 2379 2380 6432 8008; do echo "$p: $(semanage port -l | awk -v p=$p '{for(i=3;i<=NF;i++){gsub(",","",$i); split($i,r,"-"); if ($i==p || (r[2]!="" && p>=r[1] && p<=r[2])) print $1"/"$2}}' | sort -u | tr '\n' ' ')"; done
+echo "== fcontexts"; for p in /usr/libexec/keepalived /usr/libexec/keepalived/haproxy_check.sh /usr/sbin/keepalived /etc/keepalived /usr/local/bin/consul /etc/consul /etc/consul.d /opt/consul /var/log/consul /run/consul /usr/local/bin/wal-g /var/lib/pgsql/.walg.json /etc/patroni /usr/bin/vip-manager; do echo "$p $(matchpathcon -n $p 2>&1)"; done
+echo "== keepalived script domain"; sesearch -T -s keepalived_t -c process
+echo "== keepalived booleans"; getsebool -a | grep -i keepalived
+echo "== interfaces"; grep -h "^interface(\`\(corenet_tcp_bind_all_unreserved_ports\|corenet_udp_bind_all_unreserved_ports\|corenet_tcp_connect_all_unreserved_ports\|sysnet_dns_name_resolve\|corenet_rw_tun_tap_dev\|init_stream_connect\|systemd_exec_systemctl\|corenet_port\|cron_system_entry\|files_pid_filetrans\|files_config_file\)'" -r /usr/share/selinux/devel/include | sort -u
