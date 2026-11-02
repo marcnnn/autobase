@@ -62,7 +62,13 @@ jobs:
           SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5"
           ips=$(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "$INVENTORY")
           for ip in $ips; do $SSH "root@$ip" 'dnf -y -q upgrade' & done; wait
-          for ip in $ips; do $SSH "root@$ip" 'systemctl reboot' || true; done
+          # Power off and start through libvirt: virt-install --cloud-init defines the first
+          # boot as an install phase, so a reboot from inside the guest leaves it shut off.
+          for ip in $ips; do $SSH "root@$ip" 'systemctl poweroff' || true; done
+          for vm in pgnode01 pgnode02 pgnode03; do
+            for _ in $(seq 1 60); do [ "$(sudo virsh domstate $vm)" = "shut off" ] && break; sleep 2; done
+            sudo virsh start $vm
+          done
           sleep 20
           for ip in $ips; do
             for _ in $(seq 1 60); do $SSH "root@$ip" true 2>/dev/null && break; sleep 5; done
