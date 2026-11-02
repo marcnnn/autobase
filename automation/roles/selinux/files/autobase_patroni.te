@@ -91,7 +91,10 @@ manage_dirs_pattern(patroni_t, postgresql_db_t, postgresql_db_t)
 manage_files_pattern(patroni_t, postgresql_db_t, postgresql_db_t)
 manage_lnk_files_pattern(patroni_t, postgresql_db_t, postgresql_db_t)
 read_files_pattern(patroni_t, postgresql_log_t, postgresql_log_t)
+# Patroni checks that unix_socket_directories is writable by creating a file in it
+files_search_pids(patroni_t)
 manage_dirs_pattern(patroni_t, postgresql_var_run_t, postgresql_var_run_t)
+manage_files_pattern(patroni_t, postgresql_var_run_t, postgresql_var_run_t)
 
 domtrans_pattern(patroni_t, postgresql_exec_t, postgresql_t)
 ps_process_pattern(patroni_t, postgresql_t)

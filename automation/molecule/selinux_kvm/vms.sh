@@ -39,6 +39,11 @@ users:
   - name: root
     ssh_authorized_keys:
       - $PUBKEY
+# SELinux denials are only recorded in the audit log if auditd is running.
+packages:
+  - audit
+runcmd:
+  - systemctl enable --now auditd
 EOF
   printf 'instance-id: %s\nlocal-hostname: %s\n' "$name" "$name" >"/tmp/$name-meta-data"
 
