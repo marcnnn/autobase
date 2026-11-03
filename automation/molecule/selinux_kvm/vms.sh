@@ -75,6 +75,11 @@ ${ips[0]}
 ${ips[1]}
 ${ips[2]}
 
+[consul_instances]
+${ips[0]} consul_node_role=server
+${ips[1]} consul_node_role=server
+${ips[2]} consul_node_role=server
+
 [balancers]
 ${ips[0]}
 ${ips[1]}

@@ -18,7 +18,9 @@ ips=$(awk '/^\[master\]|^\[replica\]/{f=1;next} /^\[/{f=0} f && NF {print $1}' "
   for ip in $ips; do
     "${SSH[@]}" "root@$ip" 'command -v audit2allow >/dev/null || dnf -q -y install policycoreutils-python-utils >/dev/null' || true
     "${SSH[@]}" "root@$ip" 'ausearch --input-logs -m AVC,USER_AVC,SELINUX_ERR -ts boot 2>/dev/null' >"$OUT/$ip-$LABEL-avc.log"
-    "${SSH[@]}" "root@$ip" 'journalctl -b --no-pager -u patroni | tail -200; tail -n 200 /var/log/postgresql/*.log 2>/dev/null;
+    "${SSH[@]}" "root@$ip" 'for unit in patroni etcd consul vip-manager pgbouncer haproxy confd keepalived; do
+        systemctl cat $unit >/dev/null 2>&1 || continue; echo "== $unit"; journalctl -b --no-pager -u $unit | tail -60; done
+      tail -n 200 /var/log/postgresql/*.log 2>/dev/null;
       ss -ltnp; echo "auditd: $(systemctl is-active auditd)"; journalctl -k -b --no-pager | grep "avc:"' \
       >"$OUT/$ip-$LABEL-services.log" 2>&1
     count=$(grep -c '^type=AVC' "$OUT/$ip-$LABEL-avc.log" || true)
